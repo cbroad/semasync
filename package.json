@@ -1,0 +1,44 @@
+{
+  "author": "Carl Broadbent",
+  "bugs": {
+    "url": "https://github.com/cbroad/async-semaphore/issues"
+  },
+  "description": "a promise-based semaphore for handling javascript concurrency",
+  "devDependencies": {
+    "rimraf": "^3.0.2",
+    "typescript": "^4.0.5"
+  },
+  "files": [
+    "js/*",
+    "types/*"
+  ],
+  "homepage": "https://github.com/cbroad/async-semaphore#readme",
+  "keywords": [
+    "async",
+    "asynchronous",
+    "await",
+    "concurrency",
+    "mutex",
+    "promise",
+    "semaphore",
+    "sequential",
+    "typescript"
+  ],
+  "license": "MIT",
+  "main": "js/Semaphore.js",
+  "name": "semasync",
+  "private": false,
+  "productName": "Asynchronous Semaphore",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cbroad/async-semaphore.git"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf js node_modules package-lock.json types",
+    "prepare": "npm run build",
+    "unbuild": "rimraf js types"
+  },
+  "types": "./types/Semaphore.d.ts",
+  "version": "1.0.0"
+}
