@@ -78,7 +78,7 @@ export class Semaphore {
 	 * @async
 	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
 	 */
-	 public async acquire(): Promise<void>;
+	public async acquire(): Promise<void>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -90,7 +90,7 @@ export class Semaphore {
  	 *                           than other. 
 	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
 	 */
-	 public async acquire( count: number ): Promise<void>;
+	public async acquire( count: number ): Promise<void>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -105,7 +105,7 @@ export class Semaphore {
 	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
 	 * @throws "timed out" when timing out
 	 */
-	 public async acquire( count: number, timeoutMs: number ): Promise<void>;
+	public async acquire( count: number, timeoutMs: number ): Promise<void>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -116,9 +116,9 @@ export class Semaphore {
 	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
 	 * @throws "timed out" when timing out
 	 */
-	 public async acquire( options: {count?:number, timeoutMs?: number }  ): Promise<void>;
+	public async acquire( options: {count?:number, timeoutMs?: number }  ): Promise<void>;
 
-	 public async acquire( param1?: {count?:number, timeoutMs?: number }|number, param2?:number ): Promise<void> {
+	public async acquire( param1?: {count?:number, timeoutMs?: number }|number, param2?:number ): Promise<void> {
 		const count =     ( (typeof param1==="object") ? (param1?.count)     : (param1) ) ?? 1;
 		const timeoutMs = ( (typeof param1==="object") ? (param1?.timeoutMs) : (param2) ) ?? undefined;
 
@@ -262,9 +262,9 @@ export class Semaphore {
 	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
 	 * @throws "timed out" when timing out
 	 */
-	 public async wait(): Promise<void>;
-	 public async wait( options: AcquireOptions ): Promise<void>;
-	 public async wait( options?: AcquireOptions ): Promise<void> {
+	public async wait(): Promise<void>;
+	public async wait( options: AcquireOptions ): Promise<void>;
+	public async wait( options?: AcquireOptions ): Promise<void> {
 		return options ? this.acquire(options) : this.acquire();
 	}
 }
