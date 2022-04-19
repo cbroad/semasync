@@ -1,7 +1,7 @@
 {
   "author": "Carl Broadbent",
   "bugs": {
-    "url": "https://github.com/cbroad/async-semaphore/issues"
+    "url": "https://github.com/cbroad/semasync/issues"
   },
   "description": "a promise-based semaphore for handling javascript concurrency",
   "devDependencies": {
@@ -12,7 +12,7 @@
     "js/*",
     "types/*"
   ],
-  "homepage": "https://github.com/cbroad/async-semaphore#readme",
+  "homepage": "https://github.com/cbroad/semasync#readme",
   "keywords": [
     "async",
     "asynchronous",
@@ -31,7 +31,7 @@
   "productName": "Asynchronous Semaphore",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cbroad/async-semaphore.git"
+    "url": "git+https://github.com/cbroad/semasync.git"
   },
   "scripts": {
     "build": "tsc",
