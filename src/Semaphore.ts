@@ -127,7 +127,7 @@ export class Semaphore {
 		}
 
 		if( ! ( timeoutMs===undefined || ( typeof timeoutMs==="number" && Number.isInteger(timeoutMs)===true ) && timeoutMs>0 ) ) {
-			throw new Error( "Semaphore.acquire() option timeoutMs must be a positive integer or left undefined" );
+			throw new Error( "Semaphore.acquire() option timeoutMs must be a positive integer or left undefined." );
 		}
 
 		if( count===1 ) {
