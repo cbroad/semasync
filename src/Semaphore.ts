@@ -57,6 +57,10 @@ export class Semaphore {
 		return this.#size;
 	}
 
+	public get waiting():number {
+		return this.#queue.length;
+	}
+
 	/**
 	 * Sets the size of the execution pool associated with this semaphore.
 	 */
@@ -131,22 +135,27 @@ export class Semaphore {
 		}
 
 		if( count===1 ) {
-			// let queueEntry: { resolve: ( value: void|PromiseLike<void> ) => void, reject: (reason?:any)=>void }|undefined = undefined;
-			let timer: NodeJS.Timeout|undefined = undefined;
-			return new Promise<void>( ( resolve, reject ) => {
-					const queueEntry = { reject, resolve };
-					if( timeoutMs ) {
-						timer = setTimeout( () => {
-								this.#queue = this.#queue.splice( this.#queue.indexOf( queueEntry ), 1 ); // Remove resolve function from queue
-								reject( new Error("timed out") );
-							}, timeoutMs );
-					}
-		
-					this.#queue.push( queueEntry );
-					this.#next();
-				} )
-				.then( () => timer && clearTimeout( timer! ) )
-			;
+
+			let queueEntry: { reject: (reason?:any)=>void, resolve: ( value: void|PromiseLike<void> ) => void }|undefined = undefined;
+			const promise = new Promise<void>( ( resolve, reject ) => {
+				queueEntry = { reject, resolve };
+				this.#queue.push( queueEntry );
+				this.#next();
+			} );
+
+			if( timeoutMs!==undefined && timeoutMs>=0 ) {
+				const timer = setTimeout( () => {
+					this.#queue = this.#queue.splice( this.#queue.indexOf( queueEntry! ), 1 );
+					queueEntry?.reject( "timed out" );
+				}, timeoutMs );
+
+				promise.finally( () => {
+					clearTimeout( timer );
+				} );
+			}
+
+			return promise;
+
 		} else {
 			let acquired = 0;
 			try {
