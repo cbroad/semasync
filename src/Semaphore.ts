@@ -2,13 +2,31 @@
  * Options for functions acquiring semaphores.
  * 
  * @typedef {Object} AcquireOptions
- * @property {number}  [count=1]          - How many permits do you need to acquire for this execution? <br />
- *                                          This will allow you to give some code higher priority / a wider lane <br />
- *                                          than other. 
- * @property {number}  [timeoutMs]        - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
- *                                          This does not timeout the execution once it has begun, only timeout before it begins.
+ * @property {number}      [count=1]          - How many permits do you need to acquire for this execution? <br />
+ *                                              This will allow you to give some code higher priority / a wider lane <br />
+ *                                              than other. 
+ * @property {AbortSignal} [signal]           - AbortSignal for cancelling an acquisition.
+ * @property {number}      [timeoutMs]        - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
+ *                                              This does not timeout the execution once it has begun, only timeout before it begins.
  */
-export type AcquireOptions = { count?:number, timeoutMs?:number};
+export type AcquireOptions = {
+	count?:number,
+	signal?:AbortSignal,
+	timeoutMs?:number,
+};
+
+/**
+ * Entry for items queued waiting on the semaphore.  These will be the resolve and reject functions of
+ * promises generated in #acquire()
+ * 
+ * @typedef {Object} QueueEntry
+ * @property {(reason?:any)=>void} reject
+ * @property {(value:void|PromiseLikd<void>)=>void} resolve
+ */
+type QueueEntry = {
+	reject: (reason?:any)=>void,
+	resolve: (value:void|PromiseLike<void>)=>void
+};
 
 /**
  * A device used to control access to a shared resource by multiple actors.
@@ -32,7 +50,7 @@ export class Semaphore {
 	constructor( size:number );
 
 	constructor( size:number = 1 ) {
-		if( ! ( typeof size==="number" && Number.isInteger(size)===true && size>0 ) ) {
+		if( ! ( isCountingNumber(size)===true ) ) {
 			throw new Error( "Semaphore size must be an integer greater than zero." );
 		}
 		this.#available = size;
@@ -80,9 +98,10 @@ export class Semaphore {
 	 * resolves once the acquisition is complete.
 	 * 
 	 * @async
-	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 */
-	public async acquire(): Promise<void>;
+	public async acquire(): Promise<number>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -92,24 +111,60 @@ export class Semaphore {
 	 * @param {number} [count] - How many permits do you need to acquire for this execution? <br />
  	 *                           This will allow you to give some code higher priority / a wider lane <br />
  	 *                           than other. 
-	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 */
-	public async acquire( count: number ): Promise<void>;
+	public async acquire( count: number ): Promise<number>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
 	 * resolves once the acquisition is complete.
 	 * 
 	 * @async
-	 * @param    {number} [count]     - How many permits do you need to acquire for this execution? <br />
- 	 *                                  This will allow you to give some code higher priority / a wider lane <br />
- 	 *                                  than other. 
-	 * @property {number} [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
-	 *                                  This does not timeout the execution once it has begun, only timeout before it begins.
-	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
+	 * @param {number} [count]     - How many permits do you need to acquire for this execution? <br />
+ 	 *                               This will allow you to give some code higher priority / a wider lane <br />
+ 	 *                               than other. 
+	 * @param {number} [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
+	 *                               This does not timeout the execution once it has begun, only timeout before it begins.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 * @throws "timed out" when timing out
 	 */
-	public async acquire( count: number, timeoutMs: number ): Promise<void>;
+	public async acquire( count: number, timeoutMs: number ): Promise<number>;
+
+	/**
+	 * Acquires permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete.
+	 * 
+	 * @async
+	 * @param {number}      [count]  - How many permits do you need to acquire for this execution? <br />
+	 *                                 This will allow you to give some code higher priority / a wider lane <br />
+	 *                                 than other. 
+	 * @param {AbortSignal} [signal] - AbortSignal for cancelling an acquisition.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "timed out" when timing out
+	 */
+	public async acquire( count: number, signal: AbortSignal ): Promise<number>;
+
+	/**
+	 * Acquires permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete.
+	 * 
+	 * @async
+	 * @param {number}       [count]    - How many permits do you need to acquire for this execution? <br />
+	 *                                    This will allow you to give some code higher priority / a wider lane <br />
+	 *                                    than other. 
+	 * @param {AbortSignal} [signal]    - AbortSignal for cancelling an acquisition.
+	 * @param {number}      [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
+	 *                                    This does not timeout the execution once it has begun, only timeout before it begins.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "timed out" when timing out
+	 */
+	public async acquire( count: number, signal: AbortSignal, timeoutMs: number ): Promise<number>;
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -117,62 +172,98 @@ export class Semaphore {
 	 * 
 	 * @async
 	 * @param {AcquireOptions} [options] - Defined in type {@link AcquireOptions}
-	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 * @throws "timed out" when timing out
 	 */
-	public async acquire( options: {count?:number, timeoutMs?: number }  ): Promise<void>;
+	public async acquire( options: AcquireOptions  ): Promise<number>;
 
-	public async acquire( param1?: {count?:number, timeoutMs?: number }|number, param2?:number ): Promise<void> {
-		const count =     ( (typeof param1==="object") ? (param1?.count)     : (param1) ) ?? 1;
-		const timeoutMs = ( (typeof param1==="object") ? (param1?.timeoutMs) : (param2) ) ?? undefined;
+	public async acquire( param1?: AcquireOptions|number, param2?:AbortSignal|number, param3?:number ): Promise<number> {
+		const count     = ( (typeof param1==="object") ? (param1?.count)     : param1 ) ?? 1;
+		const signal    = ( (typeof param1==="object") ? (param1?.signal)     : ( (typeof param2==="object") ? param2 :  undefined ) );
+		const timeoutMs = ( (typeof param1==="object") ? (param1?.timeoutMs) : ( (typeof param2==="object") ? param3 :  param2 ) ) ?? undefined;
 
-		if( ! ( typeof count==="number" && Number.isInteger(count)===true && count>0 && count<=this.size ) ) {
-			throw new Error( "Semaphore.acquire() option count must be a positive integer or left undefined." );
+		if( ! ( isCountingNumber(count)===true && count<=this.size ) ) {
+			throw new Error( "Semaphore.acquire() option 'count' must be a positive integer or left undefined." );
 		}
 
-		if( ! ( timeoutMs===undefined || ( typeof timeoutMs==="number" && Number.isInteger(timeoutMs)===true ) && timeoutMs>0 ) ) {
-			throw new Error( "Semaphore.acquire() option timeoutMs must be a positive integer or left undefined." );
+		if( ! ( signal===undefined || signal.constructor.name==="AbortSignal" ) ) {
+			throw new Error( "Semaphore.acquire() option 'signal' must be an AbortSignal or left undefined." );
 		}
 
-		if( count===1 ) {
-
-			let queueEntry: { reject: (reason?:any)=>void, resolve: ( value: void|PromiseLike<void> ) => void }|undefined = undefined;
-			const promise = new Promise<void>( ( resolve, reject ) => {
-				queueEntry = { reject, resolve };
-				this.#queue.push( queueEntry );
-				this.#next();
-			} );
-
-			if( timeoutMs!==undefined && timeoutMs>=0 ) {
-				const timer = setTimeout( () => {
-					this.#queue = this.#queue.splice( this.#queue.indexOf( queueEntry! ), 1 );
-					queueEntry?.reject( "timed out" );
-				}, timeoutMs );
-
-				promise.finally( () => {
-					clearTimeout( timer );
-				} );
-			}
-
-			return promise;
-
-		} else {
-			let acquired = 0;
-			try {
-				await Promise.all( [ ...new Array( count ) ].map( () => this.acquire( { timeoutMs } ).then( () => acquired++ ) ) );
-			} catch(err) {
-				this.release( acquired );
-				throw err;
-			}
-			return;
+		if( ! ( timeoutMs===undefined || isCountingNumber(timeoutMs)===true ) ) {
+			throw new Error( "Semaphore.acquire() option 'timeoutMs' must be a positive integer or left undefined." );
 		}
+
+		let acquiredCount = 0;
+		try {
+			await Promise.all( [ ...new Array( count ) ].map( () => this.#acquire( { signal, timeoutMs } ).then( () => acquiredCount++ ) ) );
+		} catch(err) {
+			this.release( acquiredCount );
+			throw err;
+		}
+		return acquiredCount;
 	 }
 
 
 	/**
+	 * Private single count acquire function without any parameter checking.
+	 * 
+	 * @param {AcquireOptions} options AcquireOptions minus the count value, count is one with this function.
+	 * @returns {Promise<void>} promise that resolves once acquisition is made.
+	 */
+	async #acquire( options: AcquireOptions ): Promise<void> {
+
+		console.log("Semaphore.#acquire()");
+		const { signal, timeoutMs } = options;
+
+		let queueEntry: QueueEntry|undefined = undefined;
+		const acquirePromise = new Promise<void>( ( resolve, reject ) => {
+			queueEntry = { reject, resolve };
+			this.#queue.push( queueEntry! );
+			this.#next();
+		} );
+
+		if( signal!==undefined) {
+			const errorFunction = () => {
+				this.#queue = this.#queue.splice( this.#queue.indexOf( queueEntry! ), 1 );
+				queueEntry!.reject( "aborted" );
+			};
+			const boundErrorFunction = errorFunction.bind(this);
+			signal!.addEventListener( "abort", boundErrorFunction );
+
+			acquirePromise.finally( () => {
+				signal!.removeEventListener( "abort", boundErrorFunction );
+			} );
+		}
+
+		if( timeoutMs!==undefined ) {
+			const timer = setTimeout( () => {
+				this.#queue = this.#queue.splice( this.#queue.indexOf( queueEntry! ), 1 );
+				queueEntry!.reject( "timed out" );
+			}, timeoutMs );
+
+			acquirePromise.finally( () => {
+				clearTimeout( timer );
+			} );
+		}
+
+		return acquirePromise;
+
+	 }
+
+	public clearQueue():void {
+		let queueEntry:QueueEntry|undefined;
+		while( queueEntry = this.#queue.shift() ) {
+			queueEntry.reject( "cleared" );
+		}
+	}
+
+	/**
 	 * 
 	 * @param {()=>T|PromiseLike<T>} task - Code to be run.  If this is an asynchronous function, await will <br/>
-	 *                                     used to block execution before the semaphore is signalled again.
+	 *                                      used to block execution before the semaphore is signalled again.
 	 * @returns {Promise<T>} resolves when task completed.
 	 * @throws any thrown values from the task
 	 */
@@ -181,9 +272,10 @@ export class Semaphore {
 	/**
 	 * 
 	 * @param {()=>T|PromiseLike<T>} task - Code to be run.  If this is an asynchronous function, await will <br/>
-	 *                                     used to block execution before the semaphore is signalled again.
+	 *                                      used to block execution before the semaphore is signalled again.
 	 * @param {AcquireOptions}  [options] - Defined in type {@link AcquireOptions}
 	 * @returns {Promise<T>} resolves when task completed.
+	 * @throws "aborted" if Aborted
 	 * @throws "timed out" if timing out
 	 * @throws any thrown values from the task
 	 */
@@ -220,9 +312,9 @@ export class Semaphore {
 	#next(): void {
 		if( this.#available && this.#queue.length ) {
 			this.#available--;
-			const { resolve } = this.#queue.shift()!;
-			resolve();
+			this.#queue.shift()!.resolve();
 		}
+		console.log("Semaphore.#next() ; this.available=%j", this.available );
 	}
 
 	/**
@@ -232,20 +324,22 @@ export class Semaphore {
 	public release( count:number ): void;
 	public release( count:number=1 ): void {
 		count = count ?? 1;
-		if( ! ( typeof count==="number" && Number.isInteger(count)===true && count>0 && count<=this.size ) ) {
+		if( ! ( isCountingNumber(count)===true && count<=this.size ) ) {
 			throw new Error( "Semaphore.release() option count must be a positive integer or left undefined." );
 		}
-		if( count===1 ) {
-			if( this.#available===this.#size ) {
-				throw new Error( "Semaphore.release() trying to release when all permits are available." );
-			}
-			this.#available++;
-			this.#next();
-		} else {
-			for( let i=0 ; i<count ; i++ ) {
-				this.release( 1 );
-			}
+		for( let i=0 ; i<count ; i++ ) {
+			this.#release();
 		}
+	}
+
+	#release():void {
+		console.log( "Semaphore.#release()" );
+		if( this.#available===this.#size ) {
+			throw new Error( "Semaphore.release() trying to release when all permits are available." );
+		}
+		this.#available++;
+		console.log("Semaphore.#release() ; this.available=%j", this.available );
+		this.#next();
 	}
 
 
@@ -267,14 +361,89 @@ export class Semaphore {
 	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
 	 * 
 	 * @async
-	 * @param {AcquireOptions} [options] - Defined in type {@link AcquireOptions}
-	 * @returns {Promise<void>} Promise which resolves once the acquisition is complete
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 */
+	public async wait(): Promise<number>;
+
+	/**
+	 * Waits for permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
+	 * 
+	 * @async
+	 * @param {number} [count] - How many permits do you need to acquire for this execution? <br />
+	 *                           This will allow you to give some code higher priority / a wider lane <br />
+	 *                           than other. 
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 */
+	public async wait( count: number ): Promise<number>;
+ 
+	/**
+	 * Waits for permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
+	 * 
+	 * @async
+	 * @param {number} [count]     - How many permits do you need to acquire for this execution? <br />
+	 *                               This will allow you to give some code higher priority / a wider lane <br />
+	 *                               than other. 
+	 * @param {number} [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
+	 *                               This does not timeout the execution once it has begun, only timeout before it begins.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 * @throws "timed out" when timing out
 	 */
-	public async wait(): Promise<void>;
-	public async wait( options: AcquireOptions ): Promise<void>;
-	public async wait( options?: AcquireOptions ): Promise<void> {
-		return options ? this.acquire(options) : this.acquire();
+	public async wait( count: number, timeoutMs: number ): Promise<number>;
+ 
+	/**
+	 * Waits for permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
+	 * 
+	 * @async
+	 * @param {number}      [count]  - How many permits do you need to acquire for this execution? <br />
+	 *                                 This will allow you to give some code higher priority / a wider lane <br />
+	 *                                 than other. 
+	 * @param {AbortSignal} [signal] - AbortSignal for cancelling an acquisition.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "timed out" when timing out
+	 */
+	public async wait( count: number, signal: AbortSignal ): Promise<number>;
+ 
+	/**
+	 * Waits for permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
+	 * 
+	 * @async
+	 * @param {number}      [count]     - How many permits do you need to acquire for this execution? <br />
+	 *                                    This will allow you to give some code higher priority / a wider lane <br />
+	 *                                    than other. 
+	 * @param {AbortSignal} [signal]    - AbortSignal for cancelling an acquisition.
+	 * @param {number}      [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
+	 *                                    This does not timeout the execution once it has begun, only timeout before it begins.
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "timed out" when timing out
+	 */
+	public async wait( count: number, signal: AbortSignal, timeoutMs: number ): Promise<number>;
+ 
+	/**
+	 * Waits for permission for this semaphore.  Returns a promise which
+	 * resolves once the acquisition is complete. Alias for {@link Semaphore.acquire}.
+	 * 
+	 * @async
+	 * @param {AcquireOptions} [options] - Defined in type {@link AcquireOptions}
+	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
+	 * @throws "aborted" when signalled
+	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "timed out" when timing out
+	 */
+	public async wait( options: AcquireOptions  ): Promise<number>;
+	
+	public async wait( param1?: AcquireOptions|number, param2?:AbortSignal|number, param3?:number ): Promise<number> {
+		return this.acquire( param1 as number, param2 as AbortSignal, param3 as number );
 	}
 }
 
@@ -285,4 +454,14 @@ export class Mutex extends Semaphore {
 	constructor() {
 		super( 1 );
 	}	
+}
+
+/**
+ * Tests if a value is a counting number, an integer greater than zero.
+ * 
+ * @param n value being tested
+ * @returns true if n is a counting number, otherwise false
+ */
+function isCountingNumber( n:number ):boolean {
+	return Number.isInteger(n)===true && n>0;
 }
