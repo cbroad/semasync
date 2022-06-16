@@ -9,6 +9,112 @@ These days, JavaScript's single threaded nature can be compared to a computer wi
 
 So, why do we need a semaphore construct in JavaScript?  Because at times, we still need to isolate the actions of these execution contexts to provide a consistent, uncongested and predictable experience.
 
+
+## What's included?
+Two classes are exported from the semasync package, <code>Semaphore</code> and <code>Mutex</code>.  Mutex is equivalent to a semaphore of size 1.
+
+
+## Importing 
+```javascript
+const { Mutex, Semaphore} = require ( "semasync" );
+const sem = new Semaphore( 10 ); // Creates a semaphore of size 10.
+const sem = new Mutex(); // Creates a semaphore of size 1.
+```
+```javascript
+import { Mutex, Semaphore } from "asynciterable-joiner";
+const sem = new Semaphore( 10 ); // Creates a semaphore of size 10.
+const sem = new Mutex(); // Creates a semaphore of size 1.
+```
+
+---
+
+## Constructors
+### new Semaphore( )
+### new Semaphore( &lbrack;size=1&rbrack; )
+- **size** <code>&lt;number&gt;</code> (optional, ) the size (>0) of the semaphore
+
+### new Mutex()
+- same as <code>new Semaphore( 1 )</code>
+
+---
+
+## Instance Variables
+
+### sem.available <code>&lt;number&gt;</code> (readonly)
+- The number of leases currently available for this semaphore
+
+### sem.size <code>&lt;number&gt;</code>
+- The size of the semaphore.  Setting this can be used to resize the semaphore.
+
+### sem.waiting <code>&lt;number&gt;</code> (reaonly)
+- The number of leases in queue.
+
+---
+
+## Instance Methods
+
+### sem.acquire()
+### sem.acquire( count )
+### sem.acquire( count, signal )
+### sem.acquire( count, timeoutMs )
+### sem.acquire( count, signal, timeoutMs )
+### sem.acquire( { &lbrack;count=1&rbrack;, &lbrack;signal&rbrack;, &lbrack;timeoutMs&rbrack; } )
+- Acquires leases from the semaphore.
+- **count** <code>&lt;number&gt;</code> (optional, default=1), the number of leases to acquire
+- **signal** <code>&lt;AbortSignal&gt;</code> (optional) allows abandoning unfinished acquisitions
+- **timeoutMs** <code>&lt;number&gt;</code> (optional) allows code to abandoning unfinished acquisitions after this number of milliseconds has passed
+- Returns <code>&lt;Promise&lt;number&gt;&gt;</code> which resolves when aqcuisition has completed.  The resolved value will be the same as the number of acquired leases.
+  - Rejects <code>Error( "aborted" )</code> when signaled
+  - Rejects <code>Error( "cleared" )</code> when cleared out of queue using [sem.clearQueue()](#semclearQueue)
+  - Rejects <code>Error( "timed out" )</code> when timing out
+  - Rejects <code>Error( "too large for resize" )</code> if a semaphore resize to smaller size than this acquire count
+
+<br />
+
+### sem.clearQueue()
+- Empties the queue waiting to acquire this semaphore.  All acquiring Promises will reject with <code>Error( "cleared" )</code>
+
+<br />
+
+### sem.exec( task )
+### sem.exec( task, { &lbrack;count=1&rbrack;, &lbrack;signal&rbrack;, &lbrack;timeoutMs&rbrack; } )
+- Acquires leases from the semaphore and then runs a task, releasing the leases when the task function has completed.
+- **task** <code>&lt;()=>T|()=>Promise&lt;T&gt;&gt;</code> function to be run once semaphore is acquired
+- **count** <code>&lt;number&gt;</code> (optional, default=1), the number of leases to acquire
+- **signal** <code>&lt;AbortSignal&gt;</code> (optional) allows abandoning unfinished acquisitions
+- **timeoutMs** <code>&lt;number&gt;</code> (optional) allows code to abandoning unfinished acquisitions after this number of milliseconds has passed
+- Returns <code>&lt;Promise&lt;T&gt;&gt;</code> which resolves when aqcuisition has completed.  The resolved value will be the same as return value of the function
+  - Rejects <code>Error( "aborted" )</code> when signaled
+  - Rejects <code>Error( "cleared" )</code> when cleared out of queue using [sem.clearQueue()](#semclearQueue)
+  - Rejects <code>Error( "timed out" )</code> when timing out
+  - Rejects <code>Error( "too large for resize" )</code> if a semaphore resize to smaller size than this acquire count
+  - Passes through any rejections from the task.
+
+<br />
+
+### sem.release()
+### sem.release( count )
+- Releases lease(s) back to the semaphore.
+- **count** <code>&lt;number&gt;</code> (optional, default=1) the number of leases to be released.
+
+<br />
+
+### sem.signal()
+### sem.signal( count )
+- See [sem.release( ... )](#semrelease)
+
+<br />
+
+### sem.acquire()
+### sem.acquire( count )
+### sem.acquire( count, signal )
+### sem.acquire( count, timeoutMs )
+### sem.acquire( count, signal, timeoutMs )
+### sem.acquire( { &lbrack;count=1&rbrack;, &lbrack;signal&rbrack;, &lbrack;timeoutMs&rbrack; } )
+- See [sem.acquire( ... )](#semacquire)
+
+---
+
 ## Examples
 
 ```

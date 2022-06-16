@@ -23,11 +23,15 @@ export type AcquireOptions = {
  * 
  * @typedef {Object} QueueEntry
  * @property {(reason?:any)=>void} reject
- * @property {(value:void|PromiseLikd<void>)=>void} resolve
+ * @property {number} remaining
+ * @property {(value:number|PromiseLike<number>)=>void} resolve
+ * @property {number} size
  */
 type QueueEntry = {
-	reject: (reason?:any)=>void,
-	resolve: (value:void|PromiseLike<void>)=>void
+	reject    : (reason?:any)=>void,
+	remaining : number,
+	resolve   : (value:number|PromiseLike<number>)=>void,
+	size      : number,
 };
 
 /**
@@ -36,7 +40,7 @@ type QueueEntry = {
 export class Semaphore {
 
 	#available: number;
-	#queue: Array< { reject: (reason?:any)=>void, resolve: ( value: void|PromiseLike<void> ) => void } >;
+	#queue: QueueEntry[];
 	#size: number;
 
 	/**
@@ -70,6 +74,14 @@ export class Semaphore {
 	}
 
 	/**
+	 * Gets the queue for semaphore.  For testing purposes.
+	 * @returns an Array of QueueEntries.
+	 */
+	public get queue(): readonly QueueEntry[] {
+		return this.#queue;
+	}
+
+	/**
 	 * Gets the size of the execution pool associated with this semaphore.
 	 * @returns the size of the execution pool associated with this semaphore.
 	 */
@@ -78,7 +90,7 @@ export class Semaphore {
 	}
 
 	public get waiting():number {
-		return this.#queue.length;
+		return this.#queue.reduce( ( R, queueEntry ) => R+queueEntry.remaining , 0);
 	}
 
 	/**
@@ -88,10 +100,13 @@ export class Semaphore {
 		if( size<=0 ) {
 			throw new Error( "Semaphore size must be >0." );
 		}
-		if(size > this.#size ) {
-			this.#available += (size-this.#size);
-		}
+		const nextCount = this.#available===0 && size>this.#size ? Math.min( this.waiting, (size-this.#size) ) : 0;
+		this.#available = Math.max( 0, this.#available + (size-this.#size) );
 		this.#size = size;
+		for( let i=0 ; i<nextCount ; i++ ) {
+			this.#next();
+		}
+		this.#queue.forEach( queueEntry => { if( queueEntry.size>this.#size ) { queueEntry.reject( new Error( "too large for resize" ) ); } } );
 	}
 
 
@@ -115,6 +130,7 @@ export class Semaphore {
  	 *                           than other. 
 	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
 	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
+	 * @throws "too large for resize" if semaphore is resized to smaller than count.
 	 */
 	public async acquire( count: number ): Promise<number>;
 
@@ -130,7 +146,8 @@ export class Semaphore {
 	 *                               This does not timeout the execution once it has begun, only timeout before it begins.
 	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
 	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
-	 * @throws "timed out" when timing out
+	 * @throws "timed out" when timing out.
+	 * @throws "too large for resize" if semaphore is resized to smaller than count.
 	 */
 	public async acquire( count: number, timeoutMs: number ): Promise<number>;
 
@@ -144,9 +161,10 @@ export class Semaphore {
 	 *                                 than other. 
 	 * @param {AbortSignal} [signal] - AbortSignal for cancelling an acquisition.
 	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
-	 * @throws "aborted" when signalled
+	 * @throws "aborted" when signaled.
 	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
-	 * @throws "timed out" when timing out
+	 * @throws "timed out" when timing out.
+	 * @throws "too large for resize" if semaphore is resized to smaller than count.
 	 */
 	public async acquire( count: number, signal: AbortSignal ): Promise<number>;
 
@@ -162,9 +180,10 @@ export class Semaphore {
 	 * @param {number}      [timeoutMs] - Number of milliseconds before acquisition is aborted and exec does not procede.<br />
 	 *                                    This does not timeout the execution once it has begun, only timeout before it begins.
 	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
-	 * @throws "aborted" when signalled
+	 * @throws "aborted" when signaled.
 	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
-	 * @throws "timed out" when timing out
+	 * @throws "timed out" when timing out.
+	 * @throws "too large for resize" if semaphore is resized to smaller than count.
 	 */
 	public async acquire( count: number, signal: AbortSignal, timeoutMs: number ): Promise<number>;
 
@@ -175,9 +194,10 @@ export class Semaphore {
 	 * @async
 	 * @param {AcquireOptions} [options] - Defined in type {@link AcquireOptions}
 	 * @returns {Promise<number>} Promise which resolves the number of leases acquired once the acquisition is complete
-	 * @throws "aborted" when signalled
+	 * @throws "aborted" when signaled
 	 * @throws "cleared" cleared out of queue using {@link Semaphore.clearQueue}.
 	 * @throws "timed out" when timing out
+	 * @throws "too large for resize" if semaphore is resized to smaller than count.
 	 */
 	public async acquire( options: AcquireOptions  ): Promise<number>;
 
@@ -198,41 +218,33 @@ export class Semaphore {
 			throw new Error( "Semaphore.acquire() option 'timeoutMs' must be a positive integer or left undefined." );
 		}
 
-		let acquiredCount = 0;
-		try {
-			await Promise.all( [ ...new Array(count) ].map( () => this.#acquire( { signal, timeoutMs } ).then( () => acquiredCount++ ) ) );
-		} catch(err) {
-			if( acquiredCount>0 ) {
-				this.release( acquiredCount );
-			}
-			throw err;
-		}
-		return acquiredCount;
+		return this.#acquire( { count, signal, timeoutMs } );
 	 }
 
 
 	/**
-	 * Private single count acquire function without any parameter checking.
+	 * Private single acquire function without any parameter checking.
 	 * 
 	 * @param {AcquireOptions} options AcquireOptions minus the count value, count is one with this function.
-	 * @returns {Promise<void>} promise that resolves once acquisition is made.
+	 * @returns {Promise<number>} promise that resolves once acquisition is made.
 	 */
-	async #acquire( options: AcquireOptions ): Promise<void> {
-		const { signal, timeoutMs } = options;
+	async #acquire( options: AcquireOptions ): Promise<number> {
+		const { count, signal, timeoutMs } = options;
 
-		const queueEntry: QueueEntry = { reject:()=>{}, resolve:()=>{} };
+		const queueEntry: QueueEntry = { reject:()=>{}, remaining:count!, resolve:(value:number|PromiseLike<number>)=>{}, size:count! };
 		const finalizers:(()=>void)[] = [];
 
-		if( signal!==undefined ) {
-			const emitter = ( (signal as any).eventEmitter as EventEmitter );
-			const incremented = emitter.listenerCount( "abort" )>=emitter.getMaxListeners();
-			emitter.setMaxListeners( emitter.listenerCount( "abort" )+1 );
+		if( signal!==undefined )  {
+			if( (signal as any).eventEmitter !== undefined ) {
+				const emitter = ( (signal as any).eventEmitter as EventEmitter );
+				const incremented = emitter.listenerCount( "abort" )>=emitter.getMaxListeners();
+				emitter.setMaxListeners( emitter.listenerCount( "abort" )+1 );
+				finalizers.push( () => emitter.setMaxListeners( emitter.getMaxListeners()-1 ) );
+			}
+			
 			function onAbort() { queueEntry.reject( new Error( "aborted" ) ); }
 			signal.addEventListener( "abort", onAbort );
-			finalizers.push( () => {
-				signal.removeEventListener( "abort", onAbort );
-				emitter.setMaxListeners( emitter.getMaxListeners()-1 );
-			} );
+			finalizers.push( () => signal.removeEventListener( "abort", onAbort ) );
 		}
 
 		if( timeoutMs!==undefined ) {
@@ -240,20 +252,22 @@ export class Semaphore {
 			finalizers.push( () => clearTimeout( timer ) );
 		}
 
-		return new Promise<void>( ( resolve, reject ) => {
+		return new Promise<number>( ( resolve, reject ) => {
 				queueEntry.reject = reject;
 				queueEntry.resolve = resolve;
 				this.#queue.push( queueEntry );
 				this.#next();
 			} ).catch( err => {
 				this.#queue.splice( this.#queue.indexOf( queueEntry ), 1 );
+				if( queueEntry.remaining!==queueEntry.size ) {
+					this.release( queueEntry.size - queueEntry.remaining );
+				}
 				throw err;
 			} ).finally( () => {
 				for( const finalizer of finalizers ) {
 					finalizer();
 				}
 			} );
-
 
 	 }
 
@@ -266,7 +280,7 @@ export class Semaphore {
 	/**
 	 * 
 	 * @param {()=>T|PromiseLike<T>} task - Code to be run.  If this is an asynchronous function, await will <br/>
-	 *                                      used to block execution before the semaphore is signalled again.
+	 *                                      used to block execution before the semaphore is signaled again.
 	 * @returns {Promise<T>} resolves when task completed.
 	 * @throws any thrown values from the task
 	 */
@@ -275,7 +289,7 @@ export class Semaphore {
 	/**
 	 * 
 	 * @param {()=>T|PromiseLike<T>} task - Code to be run.  If this is an asynchronous function, await will <br/>
-	 *                                      used to block execution before the semaphore is signalled again.
+	 *                                      used to block execution before the semaphore is signaled again.
 	 * @param {AcquireOptions}  [options] - Defined in type {@link AcquireOptions}
 	 * @returns {Promise<T>} resolves when task completed.
 	 * @throws "aborted" if Aborted
@@ -287,6 +301,7 @@ export class Semaphore {
 	public async exec<T extends unknown>( task: ()=>T|PromiseLike<T>, options?: AcquireOptions ): Promise<T> {
 
 		const count:number = options?.count ?? 1;
+		const signal = options?.signal;
 		const timeoutMs: number|undefined = options?.timeoutMs ?? undefined;
 
 		if( ! ( typeof task === "function" ) ) {
@@ -295,7 +310,7 @@ export class Semaphore {
 		
 		// In order to run in loop, exec should be synchronous with acquire, but the actual task should run outside of the thread.
 
-		await this.acquire( { count, timeoutMs } );
+		await this.acquire( { count, signal, timeoutMs } );
 
 		// Execute the task in another "thread", release semaphore upon completion.
 		const taskPromise = ( async () => {
@@ -313,9 +328,14 @@ export class Semaphore {
 	 * Iff there is available resource and a promise in the queue, resolves the next acquire promise.
 	 */
 	#next(): void {
-		if( this.#available && this.#queue.length ) {
+		if( this.#available>0 && this.#queue.length>0 ) {
 			this.#available--;
-			this.#queue.shift()!.resolve();
+			const queueEntry = this.#queue[0];
+			queueEntry.remaining--;
+			if( queueEntry.remaining===0 ) {
+				this.#queue.shift();
+				queueEntry.resolve( queueEntry.size );
+			}
 		}
 	}
 
