@@ -22,16 +22,16 @@ export type AcquireOptions = {
  * promises generated in #acquire()
  * 
  * @typedef {Object} QueueEntry
+ * @property {number} acquired
+ * @property {number} count
  * @property {(reason?:any)=>void} reject
- * @property {number} remaining
  * @property {(value:number|PromiseLike<number>)=>void} resolve
- * @property {number} size
  */
 type QueueEntry = {
+	acquired  : number,
 	reject    : (reason?:any)=>void,
-	remaining : number,
+	requested : number,
 	resolve   : (value:number|PromiseLike<number>)=>void,
-	size      : number,
 };
 
 /**
@@ -90,7 +90,7 @@ export class Semaphore {
 	}
 
 	public get waiting():number {
-		return this.#queue.reduce( ( R, queueEntry ) => R+queueEntry.remaining , 0);
+		return this.#queue.reduce( ( R, queueEntry ) => R+(queueEntry.requested - queueEntry.acquired) , 0);
 	}
 
 	/**
@@ -106,7 +106,7 @@ export class Semaphore {
 		for( let i=0 ; i<nextCount ; i++ ) {
 			this.#next();
 		}
-		this.#queue.forEach( queueEntry => { if( queueEntry.size>this.#size ) { queueEntry.reject( new Error( "too large for resize" ) ); } } );
+		this.#queue.forEach( queueEntry => { if( queueEntry.requested>this.#size ) { queueEntry.reject( new Error( "too large for resize" ) ); } } );
 	}
 
 
@@ -231,7 +231,7 @@ export class Semaphore {
 	async #acquire( options: AcquireOptions ): Promise<number> {
 		const { count, signal, timeoutMs } = options;
 
-		const queueEntry: QueueEntry = { reject:()=>{}, remaining:count!, resolve:(value:number|PromiseLike<number>)=>{}, size:count! };
+		const queueEntry: QueueEntry = { acquired:0, reject:()=>{}, requested:count!, resolve:(value:number|PromiseLike<number>)=>{} };
 		const finalizers:(()=>void)[] = [];
 
 		if( signal!==undefined )  {
@@ -259,8 +259,8 @@ export class Semaphore {
 				this.#next();
 			} ).catch( err => {
 				this.#queue.splice( this.#queue.indexOf( queueEntry ), 1 );
-				if( queueEntry.remaining!==queueEntry.size ) {
-					this.release( queueEntry.size - queueEntry.remaining );
+				if( queueEntry.acquired===queueEntry.requested ) {
+					this.release( queueEntry.acquired );
 				}
 				throw err;
 			} ).finally( () => {
@@ -331,10 +331,10 @@ export class Semaphore {
 		if( this.#available>0 && this.#queue.length>0 ) {
 			this.#available--;
 			const queueEntry = this.#queue[0];
-			queueEntry.remaining--;
-			if( queueEntry.remaining===0 ) {
+			queueEntry.acquired++;
+			if( queueEntry.acquired===queueEntry.requested ) {
 				this.#queue.shift();
-				queueEntry.resolve( queueEntry.size );
+				queueEntry.resolve( queueEntry.requested );
 			}
 		}
 	}
