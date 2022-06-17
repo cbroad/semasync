@@ -336,6 +336,7 @@ export class Semaphore {
 				this.#queue.shift();
 				queueEntry.resolve( queueEntry.requested );
 			}
+			this.#next();
 		}
 	}
 
