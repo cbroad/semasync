@@ -26,7 +26,7 @@
     "typescript"
   ],
   "license": "MIT",
-  "main": "js/Semaphore.js",
+  "main": "js/index.js",
   "name": "semasync",
   "private": false,
   "productName": "Asynchronous Semaphore",
