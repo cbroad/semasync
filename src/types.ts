@@ -21,8 +21,6 @@ export type ResolveFunction<T> = (value: T | PromiseLike<T>) => void;
  */
 export type SemaphoreTask<T> = () => T | PromiseLike<T>;
 
-
-
 /**
  * Entry for items queued waiting on the semaphore.  These will be the resolve and reject functions of
  * promises generated in #acquire()
@@ -32,11 +30,12 @@ export type SemaphoreTask<T> = () => T | PromiseLike<T>;
  * @property {number} count
  * @property {RejectFunction} reject
  * @property {number} requested
- * @property {ResolveFunction<number>} resolve
+ * @property {ResolveFunction<()=>void>} resolve
  */
 export interface QueueEntry {
     acquired: number;
     reject: RejectFunction;
+    rejected: boolean;
     requested: number;
-    resolve: ResolveFunction<number>;
+    resolve: ResolveFunction<() => void>;
 };

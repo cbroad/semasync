@@ -5,5 +5,5 @@
  * @returns true if n is a counting number, otherwise false
  */
 export function isCountingNumber(n: number): boolean {
-    return Number.isInteger(n) === true && n > 0;
+    return Number.isInteger(n) && n > 0;
 }

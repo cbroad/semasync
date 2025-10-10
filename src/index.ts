@@ -16,3 +16,5 @@ export type {
     RejectFunction,
     ResolveFunction
 } from "./types";
+
+export * from "./TaskQueue";
