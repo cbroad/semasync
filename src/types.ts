@@ -30,7 +30,7 @@ export type SemaphoreTask<T> = () => T | PromiseLike<T>;
  * @property {number} count
  * @property {RejectFunction} reject
  * @property {number} requested
- * @property {ResolveFunction<()=>void>} resolve
+ * @property {ResolveFunction<function():void>} resolve
  */
 export interface QueueEntry {
     acquired: number;
