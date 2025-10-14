@@ -25,6 +25,7 @@ export class SimpleSemaphore {
     #available: number;
     #queue: TaskQueue<QueueEntry>;
     #size: number;
+    #waiting: number;
 
     /**
      * Creates a mutex, a semaphore of size 1.
@@ -54,6 +55,7 @@ export class SimpleSemaphore {
         this.#available = size;
         this.#queue = queue;
         this.#size = size;
+        this.#waiting = 0;
     }
 
 
@@ -81,14 +83,13 @@ export class SimpleSemaphore {
         return this.#size;
     }
 
+    /**
+     * Gets the number of waiting leases in queue.  Not the number of threads waiting for
+     * access, but the aggregate number of requested leases.
+     * @returns the number or requested leases.
+     */
     public get waiting(): number {
-        let requests: number = 0;
-        for (const queueEntry of this.#queue) {
-            if (!queueEntry.rejected) {
-                requests += (queueEntry.requested - queueEntry.acquired);
-            }
-        }
-        return requests;
+        return this.#waiting;
     }
 
     /**
@@ -178,9 +179,11 @@ export class SimpleSemaphore {
             queueEntry.reject = reject;
             queueEntry.resolve = resolve;
             this.#queue.push(queueEntry);
+            this.#waiting += queueEntry.requested;
             this.#next();
         }).catch(err => {
             queueEntry.rejected = true;
+            this.#waiting -= queueEntry.requested - queueEntry.acquired;
             if (queueEntry.acquired) {
                 this.release(queueEntry.acquired);
                 queueEntry.acquired = 0;
@@ -259,6 +262,7 @@ export class SimpleSemaphore {
             } else {
                 this.#available--;
                 queueEntry.acquired++;
+                this.#waiting--;
                 if (queueEntry.acquired === queueEntry.requested) {
                     this.#queue.shift();
                     queueEntry.resolve(() => this.#release(queueEntry.requested));
