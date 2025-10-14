@@ -1,5 +1,7 @@
 import { AbstractTaskQueue } from "./AbstractTaskQueue";
 
+const USE_OBJECT_POOLING = false as const;
+
 class LinkedListNode<T> {
     value: T;
     next: LinkedListNode<T> | null = null;
@@ -9,7 +11,12 @@ class LinkedListNode<T> {
     }
 }
 
-class NodePool<T> {
+interface LinkedListNodePool<T> {
+    acquire(value: T): LinkedListNode<T>;
+    release(node: LinkedListNode<T>): void;
+}
+
+class NodePool<T> implements LinkedListNodePool<T> {
     #stack: LinkedListNode<T>[] = [];
 
     acquire(value: T): LinkedListNode<T> {
@@ -30,10 +37,17 @@ class NodePool<T> {
     }
 }
 
+class FakePool<T> implements LinkedListNodePool<T> {
+    acquire(value: T): LinkedListNode<T> {
+        return new LinkedListNode(value);
+    }
+    release(node: LinkedListNode<T>) { }
+}
+
 export class LinkedListQueue<T> extends AbstractTaskQueue<T> {
     #head: LinkedListNode<T> | null = null;
     #tail: LinkedListNode<T> | null = null;
-    #pool: NodePool<T> = new NodePool<T>();
+    #pool: LinkedListNodePool<T> = USE_OBJECT_POOLING ? new NodePool<T>() : new FakePool<T>();
     #count: number = 0;
 
     get length(): number {
