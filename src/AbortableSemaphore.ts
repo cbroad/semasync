@@ -4,6 +4,15 @@ import { SimpleSemaphore } from "./SimpleSemaphore";
 import type { QueueEntry, SemaphoreTask } from "./types";
 import { isCountingNumber } from "./util";
 
+const CAN_ADJUST_LISTENERS: boolean = (() => {
+	const ac = new AbortController();
+	const signal = ac.signal;
+	const eventEmitter = (signal as any).eventEmitter;
+	return eventEmitter &&
+		typeof eventEmitter.getMaxListeners === "function" &&
+		typeof eventEmitter.setMaxListeners === "function";
+})();
+
 /**
  * Options for functions acquiring semaphores.
  * 
@@ -119,7 +128,11 @@ export class AbortableSemaphore extends SimpleSemaphore {
 	 */
 	public async acquire(options: AbortableAcquireOptions): Promise<() => void>;
 
-	public async acquire(param1?: AbortableAcquireOptions | number, param2?: AbortSignal | number, param3?: number): Promise<() => void> {
+	public async acquire(
+		param1?: AbortableAcquireOptions | number,
+		param2?: AbortSignal | number,
+		param3?: number
+	): Promise<() => void> {
 		const count = ((typeof param1 === "object") ? (param1?.count) : param1) ?? 1;
 		const signal = ((typeof param1 === "object") ? (param1?.signal) : ((typeof param2 === "object") ? param2 : undefined));
 		const timeoutMs = ((typeof param1 === "object") ? (param1?.timeoutMs) : ((typeof param2 === "object") ? param3 : param2)) ?? undefined;
@@ -128,7 +141,7 @@ export class AbortableSemaphore extends SimpleSemaphore {
 			throw new Error("AbortableSemaphore.acquire() option 'count' must be a positive integer or left undefined.");
 		}
 
-		if (signal !== undefined && signal.constructor.name !== "AbortSignal") {
+		if (signal !== undefined && typeof (signal as any).aborted !== "boolean") {
 			throw new Error("AbortableSemaphore.acquire() option 'signal' must be an AbortSignal or left undefined.");
 		}
 
@@ -165,28 +178,41 @@ export class AbortableSemaphore extends SimpleSemaphore {
 		let [promise, queueEntry] = super._acquire(options);
 
 		if (signal !== undefined) {
-			const onAbort = () => { queueEntry.reject(new Error("aborted")); }
+			if (signal.aborted) {
+				queueEntry.reject(new Error("aborted"));
+				return [promise, queueEntry];
+			}
+
+			const onAbort = () => {
+				if (!queueEntry.rejected) {
+					queueEntry.reject(new Error("aborted"));
+				}
+			};
 
 			// In Node.js, AbortSignal contains an events.EventEmitter. An EventEmitter will
 			// print a warning if when the number of listeners passes maxListeners. This code
 			// will increment and decrement the maxListeners count to avoid the warning message.
 
 			const eventEmitter: any = (signal as any).eventEmitter;
-			eventEmitter?.setMaxListeners(eventEmitter.getMaxListeners() + 1);
+			if (CAN_ADJUST_LISTENERS) {
+				eventEmitter.setMaxListeners(eventEmitter.getMaxListeners() + 1);
+			}
 			signal.addEventListener("abort", onAbort);
 			promise = promise.finally(() => {
 				signal.removeEventListener("abort", onAbort);
-				eventEmitter?.setMaxListeners(eventEmitter.getMaxListeners() - 1);
+				if (CAN_ADJUST_LISTENERS) {
+					eventEmitter?.setMaxListeners(eventEmitter.getMaxListeners() - 1);
+				}
 			});
 		}
 
 		if (timeoutMs !== undefined) {
-			const timer = setTimeout(() => queueEntry.reject(new Error("timed out")), timeoutMs);
+			const timer = setTimeout(() => {
+				if (!queueEntry.rejected) {
+					queueEntry.reject(new Error("timed out"));
+				}
+			}, timeoutMs);
 			promise = promise.finally(() => clearTimeout(timer));
-		}
-
-		if (signal?.aborted) {
-			queueEntry.reject(new Error("aborted"));
 		}
 
 		return [promise, queueEntry];
@@ -231,7 +257,7 @@ export class AbortableSemaphore extends SimpleSemaphore {
 			throw new Error("AbortableSemaphore.exec() option 'count' must be a positive integer or left undefined.");
 		}
 
-		if (signal !== undefined && signal.constructor.name !== "AbortSignal") {
+		if (signal !== undefined && typeof (signal as any).aborted !== "boolean") {
 			throw new Error("AbortableSemaphore.exec() option 'signal' must be an AbortSignal or left undefined.");
 		}
 
@@ -241,20 +267,15 @@ export class AbortableSemaphore extends SimpleSemaphore {
 
 		// In order to run in loop, exec should be synchronous with acquire, but the actual task should run outside of the thread.
 
-		const [semPromise, entry] = this._acquire({ count, signal, timeoutMs });
+		const [acquirePromise, entry] = this._acquire({ count, signal, timeoutMs });
 
-		let release = await semPromise;
+		let release = await acquirePromise;
 
-		// Execute the task in another "thread", release semaphore upon completion.
-		const taskPromise = (async () => {
-			try {
-				return await task();
-			} finally {
-				release();
-			}
-		})();
-
-		return taskPromise
+		try {
+			return await task();
+		} finally {
+			release();
+		}
 	}
 
 	/**
@@ -267,10 +288,14 @@ export class AbortableSemaphore extends SimpleSemaphore {
 	public async wait(count: number, signal: AbortSignal): Promise<() => void>;
 	public async wait(count: number, signal: AbortSignal, timeoutMs: number): Promise<() => void>;
 	public async wait(options: AbortableAcquireOptions): Promise<() => void>;
-
-	public async wait(param1?: AbortableAcquireOptions | number, param2?: AbortSignal | number, param3?: number): Promise<() => void> {
+	public async wait(
+		param1?: AbortableAcquireOptions | number,
+		param2?: AbortSignal | number,
+		param3?: number
+	): Promise<() => void> {
 		return this.acquire(param1 as any, param2 as any, param3 as any);
 	}
+
 }
 
 /**

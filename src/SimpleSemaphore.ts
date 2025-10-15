@@ -1,6 +1,6 @@
 /** @import { QueueEntry, SemaphoreTask } from "./types.ts"; */
 import { type TaskQueue, CircularBufferQueue } from "./TaskQueue";
-import type { QueueEntry, SemaphoreTask } from "./types";
+import type { QueueEntry, RejectFunction, ResolveFunction, SemaphoreTask } from "./types";
 import { isCountingNumber } from "./util";
 
 /**
@@ -14,6 +14,9 @@ import { isCountingNumber } from "./util";
 export type AcquireOptions = {
     count?: number,
 };
+
+const EmptyReject: RejectFunction = (err?: any) => { };
+const EmptyResolve: ResolveFunction<any> = (val: any) => { };
 
 /**
  * A device used to control access to a shared resource by multiple actors.
@@ -71,9 +74,9 @@ export class SimpleSemaphore {
      * Gets the queue for semaphore.  For testing purposes.
      * @returns an Array of QueueEntries.
      */
-    public get queue(): readonly QueueEntry[] {
-        return Object.freeze([...this.#queue].filter(entry => !entry.rejected));
-    }
+    // public get queue(): readonly QueueEntry[] {
+    //     return Object.freeze([...this.#queue].filter(entry => !entry.rejected));
+    // }
 
     /**
      * Gets the size of the execution pool associated with this semaphore.
@@ -99,17 +102,17 @@ export class SimpleSemaphore {
         if (isCountingNumber(size) === false) {
             throw new Error("Semaphore size must be an integer >0.");
         }
-        const nextCount = this.#available === 0 && size > this.#size ? Math.min(this.waiting, (size - this.#size)) : 0;
+        // Recompute #available and #size based on provided value for size.
         this.#available = Math.max(0, this.#available + (size - this.#size));
         this.#size = size;
-        for (let i = 0; i < nextCount; i++) {
-            this.#next();
-        }
+        // Reject any promises where the request was larger than the semaphore can provide for.
         for (const queueEntry of this.#queue) {
             if (!queueEntry.rejected && queueEntry.requested > this.#size) {
                 queueEntry.reject(new Error("too large for resize"));
             }
         }
+        // Process any requests that can be filled with new size.
+        this.#next();
     }
 
     /**
@@ -169,10 +172,10 @@ export class SimpleSemaphore {
 
         const queueEntry: QueueEntry = {
             acquired: 0,
-            reject: null as any,
+            reject: EmptyReject,
             rejected: false,
             requested: count!,
-            resolve: null as any,
+            resolve: EmptyResolve,
         };
 
         const promise = new Promise<() => void>((resolve, reject) => {
@@ -195,10 +198,15 @@ export class SimpleSemaphore {
 
     }
 
+    /**
+     * Empties the queue and resets the available count.
+     */
     public clearQueue(): void {
-        for (const queueEntry of this.#queue) {
+        let queueEntry: QueueEntry | undefined;
+        while (queueEntry = this.#queue.shift()) {
             queueEntry.reject(new Error("cleared"));
         }
+        this.#next();
     }
 
     /**
@@ -234,21 +242,15 @@ export class SimpleSemaphore {
             throw new Error("AbortableSemaphore.exec() option 'count' must be a positive integer or left undefined.");
         }
 
+        const [acquirePromise, entry] = this._acquire({ count });
 
-        const [semPromise, entry] = this._acquire({ count });
+        let release = await acquirePromise;
 
-        let release = await semPromise;
-
-        // Execute the task in another "thread", release semaphore upon completion.
-        const taskPromise = (async () => {
-            try {
-                return await task();
-            } finally {
-                release();
-            }
-        })();
-
-        return taskPromise
+        try {
+            return await task();
+        } finally {
+            release();
+        }
     }
 
     /**
@@ -259,14 +261,25 @@ export class SimpleSemaphore {
             const queueEntry = this.#queue.at(0) as QueueEntry;
             if (queueEntry.rejected) {
                 this.#queue.shift();
+                continue
+            }
+            const remaining = queueEntry.requested - queueEntry.acquired;
+            if (remaining > this.#available) {
+                // Partial Acquisition
+                queueEntry.acquired += this.#available;
+                this.#available = 0;
             } else {
-                this.#available--;
-                queueEntry.acquired++;
-                this.#waiting--;
-                if (queueEntry.acquired === queueEntry.requested) {
-                    this.#queue.shift();
-                    queueEntry.resolve(() => this.#release(queueEntry.requested));
-                }
+                // Full Acquisition
+                this.#available -= remaining;
+                this.#waiting -= remaining;
+                queueEntry.acquired = queueEntry.requested;
+                this.#queue.shift();
+                queueEntry.resolve(() => {
+                    if (queueEntry.acquired) {
+                        this.#release(queueEntry.acquired);
+                        queueEntry.acquired = 0;
+                    }
+                });
             }
         }
     }
@@ -285,14 +298,17 @@ export class SimpleSemaphore {
         this.#release(count);
     }
 
-    #release(): void;
-    #release(count: number): void;
     #release(count: number = 1): void {
         if (this.#available + count > this.#size) {
             throw new Error("Semaphore.release() trying to release when all permits are available.");
         }
         this.#available += count;
         this.#next();
+    }
+
+    public reset(): void {
+        this.clearQueue();
+        this.#available = this.#size;
     }
 
     /**
@@ -312,8 +328,8 @@ export class SimpleSemaphore {
     public async wait(count: number): Promise<() => void>;
     public async wait(options: AcquireOptions): Promise<() => void>;
 
-    public async wait(param1: AcquireOptions | number = 1): Promise<() => void> {
-        return this.acquire(param1 as AcquireOptions);
+    public async wait(param1?: AcquireOptions | number): Promise<() => void> {
+        return this.acquire(param1 as any);
     }
 }
 

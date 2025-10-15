@@ -1,6 +1,6 @@
 import { AbstractTaskQueue } from "./AbstractTaskQueue";
 
-const USE_OBJECT_POOLING = false as const;
+const DEFAULT_USE_OBJECT_POOLING = false as const;
 
 class LinkedListNode<T> {
     value: T;
@@ -17,21 +17,22 @@ interface LinkedListNodePool<T> {
 }
 
 class NodePool<T> implements LinkedListNodePool<T> {
-    #stack: LinkedListNode<T>[] = [];
+    #stack: LinkedListNode<T | null>[] = [];
 
     acquire(value: T): LinkedListNode<T> {
         if (this.#stack.length > 0) {
             const node = this.#stack.pop()!;
             node.value = value;
-            return node;
+            return node as LinkedListNode<T>;
         }
         return new LinkedListNode(value);
     }
 
-    release(node: LinkedListNode<T>): void {
+    release(node: LinkedListNode<T>): void;
+    release(node: LinkedListNode<T | null>): void {
         if (this.#stack.length < 100) {
             node.next = null;
-            node.value = null as unknown as T; // Clear the value to avoid memory leaks
+            node.value = null; // Clear the value to avoid memory leaks
             this.#stack.push(node);
         }
     }
@@ -44,11 +45,24 @@ class FakePool<T> implements LinkedListNodePool<T> {
     release(node: LinkedListNode<T>) { }
 }
 
+export interface LinkedListParams {
+    useObjectPooling?: boolean;
+}
+
 export class LinkedListQueue<T> extends AbstractTaskQueue<T> {
     #head: LinkedListNode<T> | null = null;
     #tail: LinkedListNode<T> | null = null;
-    #pool: LinkedListNodePool<T> = USE_OBJECT_POOLING ? new NodePool<T>() : new FakePool<T>();
+    #pool: LinkedListNodePool<T>;
     #count: number = 0;
+
+    constructor();
+    constructor(params: LinkedListParams);
+    constructor(params?: LinkedListParams) {
+        super();
+        const useObjectPooling = params?.useObjectPooling ?? DEFAULT_USE_OBJECT_POOLING;
+        this.#pool = useObjectPooling ? new NodePool<T>() : new FakePool<T>();
+
+    }
 
     get length(): number {
         return this.#count;

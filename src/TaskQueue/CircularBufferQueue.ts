@@ -57,6 +57,17 @@ export class CircularBuffer<T> extends AbstractTaskQueue<T> {
         return arr;
     }
 
+    /**
+     * Resizes the internal buffer array.
+     * 
+     * As a protected function, this function is only ever called interally, with the
+     * buffer starting as a power of two, and multiplying or dividing by 2, with a floor
+     * of the initial length. The newCapacity passed to this function will only ever by
+     * a whole number which is divisible by two.
+     * 
+     * @param {number} newCapacity - new max capacity for buffer.
+     * 
+     */
     protected _resize(newCapacity: number): void {
         this.#buffer = this.#copyToArray(new Array<T | undefined>(newCapacity));
         this.#head = 0;
@@ -76,6 +87,12 @@ export class CircularBuffer<T> extends AbstractTaskQueue<T> {
 
     }
 
+    /**
+     * Adds an item to the queue.
+     * @throws {Error} when the buffer is full.
+     * 
+     * @param item item to add to end of queue.
+     */
     push(item: T): void {
         if (this.capacity === this.length) {
             throw new Error("CircularBuffer is full.");
@@ -110,6 +127,11 @@ export class GrowingCircularBuffer<T> extends CircularBuffer<T> {
         this._resize(newCapacity);
     }
 
+    /**
+     * Adds an item to the queue. If the buffer is full, it will resize.
+     * 
+     * @param item item to add to end of queue.
+     */
     push(item: T): void {
         if (this.capacity === this.length) {
             this.#grow();
