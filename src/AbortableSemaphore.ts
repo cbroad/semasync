@@ -1,17 +1,8 @@
 import type { AcquireOptions } from "./SimpleSemaphore";
 import { SimpleSemaphore } from "./SimpleSemaphore";
 /** @import { SemaphoreTask } from "./types.ts"; */
-import type { QueueEntry, SemaphoreTask } from "./types";
-import { isCountingNumber } from "./util";
-
-const CAN_ADJUST_LISTENERS: boolean = (() => {
-	const ac = new AbortController();
-	const signal = ac.signal;
-	const eventEmitter = (signal as any).eventEmitter;
-	return eventEmitter &&
-		typeof eventEmitter.getMaxListeners === "function" &&
-		typeof eventEmitter.setMaxListeners === "function";
-})();
+import type { QueueEntry, RejectFunction, SemaphoreTask } from "./types";
+import { EmptyReject, EmptyResolve, isCountingNumber } from "./util";
 
 /**
  * Options for functions acquiring semaphores.
@@ -36,6 +27,38 @@ export type AbortableAcquireOptions = AcquireOptions & {
 export class AbortableSemaphore extends SimpleSemaphore {
 
 	readonly [Symbol.toStringTag]: string = "AbortableSemaphore";
+
+	#abortMap: Map<AbortSignal, [() => void, Set<RejectFunction>]> = new Map();
+
+	#getAbortRecord(signal: AbortSignal): [() => void, Set<RejectFunction>] {
+		let record = this.#abortMap.get(signal);
+		if (record) {
+			return record;
+		}
+		const set: Set<RejectFunction> = new Set();
+		const handleAbort = () => {
+			const err = new Error("aborted");
+			set.forEach(reject => reject(err));
+		};
+		record = [handleAbort, set];
+		signal.addEventListener("abort", handleAbort);
+		this.#abortMap.set(signal, record);
+		return record;
+	}
+
+	#addAbortListener(signal: AbortSignal, reject: RejectFunction) {
+		const [_handleAbort, set] = this.#getAbortRecord(signal);
+		set.add(reject);
+	}
+
+	#removeAbortListener(signal: AbortSignal, reject: RejectFunction) {
+		const [handleAbort, set] = this.#getAbortRecord(signal);
+		set.delete(reject);
+		if (set.size === 0) {
+			signal.removeEventListener("abort", handleAbort);
+			this.#abortMap.delete(signal);
+		}
+	}
 
 	/**
 	 * Acquires permission for this semaphore.  Returns a promise which
@@ -167,10 +190,10 @@ export class AbortableSemaphore extends SimpleSemaphore {
 				Promise.reject(new Error("aborted")),
 				{
 					acquired: 0,
-					reject: null as any,
+					reject: EmptyReject,
 					rejected: true,
 					requested: options.count ?? 1,
-					resolve: null as any,
+					resolve: EmptyResolve,
 				}
 			];
 		}
@@ -182,27 +205,9 @@ export class AbortableSemaphore extends SimpleSemaphore {
 				queueEntry.reject(new Error("aborted"));
 				return [promise, queueEntry];
 			}
-
-			const onAbort = () => {
-				if (!queueEntry.rejected) {
-					queueEntry.reject(new Error("aborted"));
-				}
-			};
-
-			// In Node.js, AbortSignal contains an events.EventEmitter. An EventEmitter will
-			// print a warning if when the number of listeners passes maxListeners. This code
-			// will increment and decrement the maxListeners count to avoid the warning message.
-
-			const eventEmitter: any = (signal as any).eventEmitter;
-			if (CAN_ADJUST_LISTENERS) {
-				eventEmitter.setMaxListeners(eventEmitter.getMaxListeners() + 1);
-			}
-			signal.addEventListener("abort", onAbort);
+			this.#addAbortListener(signal, queueEntry.reject);
 			promise = promise.finally(() => {
-				signal.removeEventListener("abort", onAbort);
-				if (CAN_ADJUST_LISTENERS) {
-					eventEmitter?.setMaxListeners(eventEmitter.getMaxListeners() - 1);
-				}
+				this.#removeAbortListener(signal, queueEntry.reject);
 			});
 		}
 

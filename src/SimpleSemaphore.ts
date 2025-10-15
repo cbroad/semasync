@@ -1,7 +1,7 @@
 /** @import { QueueEntry, SemaphoreTask } from "./types.ts"; */
 import { type TaskQueue, CircularBufferQueue } from "./TaskQueue";
-import type { QueueEntry, RejectFunction, ResolveFunction, SemaphoreTask } from "./types";
-import { isCountingNumber } from "./util";
+import type { QueueEntry, SemaphoreTask } from "./types";
+import { EmptyReject, EmptyResolve, isCountingNumber } from "./util";
 
 /**
  * Options for functions acquiring semaphores.
@@ -14,9 +14,6 @@ import { isCountingNumber } from "./util";
 export type AcquireOptions = {
     count?: number,
 };
-
-const EmptyReject: RejectFunction = (err?: any) => { };
-const EmptyResolve: ResolveFunction<any> = (val: any) => { };
 
 /**
  * A device used to control access to a shared resource by multiple actors.
