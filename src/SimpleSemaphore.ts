@@ -11,8 +11,26 @@ import { EmptyReject, EmptyResolve, isCountingNumber } from "./util";
  *                                              This will allow you to give some code higher priority / a wider lane <br />
  *                                              than other code.
  */
-export type AcquireOptions = {
+export interface AcquireOptions {
     count?: number,
+};
+
+/**
+ * Options for functions acquiring semaphores.
+ * 
+ * @typedef {Object} SemaphoreParams
+ * @property {boolean} [allowOverReleasing=true] - How to handle realeases that overshoot size. <br />
+ *                                                 If true, available is set to size <br />
+ *                                                 If false, throw exception.
+ * @property {queue} [TaskQueue&lt;any&gt;=CircularBufferQueue&lt;any&gt;]
+ *                                               - Queue mechanism to use to keep track of waiting threads.
+ * @property {number} [size=1]                   - Size of execution pool.  This is the number of threads whose execution <br />
+ *                                                 is allowed by this semaphore.
+ */
+export interface SemaphoreParams {
+    allowOverReleasing?: boolean;
+    queue?: TaskQueue<any>
+    size?: number
 };
 
 /**
@@ -22,6 +40,7 @@ export class SimpleSemaphore {
 
     readonly [Symbol.toStringTag]: string = "Semaphore";
 
+    #allowOverReleasing: boolean;
     #available: number;
     #queue: TaskQueue<QueueEntry>;
     #size: number;
@@ -42,18 +61,25 @@ export class SimpleSemaphore {
     /**
      * Create a semaphore.
      * @constructor
-     * @param {number} [size=1] Size of execution pool.  This is the number of threads whose execution is allowed by this semaphore
-     * @param {TaskQueue} [queue=CircularBufferQueue] queue to be used in semaphore
-     *                          (Compatible with Array APIs: .length (Set and Get), &lsqb;Symbol.iterator&rsqb;() .at(), .push(), .shift())  
+     * @param {SemaphoreParams} params parameters for this semaphore
      */
-    constructor(size: number, queue: TaskQueue<any>);
+    constructor(params: SemaphoreParams);
 
-    constructor(size: number = 1, queue: TaskQueue<any> = new CircularBufferQueue()) {
-        if (isCountingNumber(size) === false) {
-            throw new Error("Semaphore size must be an integer greater than zero.");
+    constructor(param?: any) {
+        const isNumber: boolean = typeof param === "number";
+        const size = (isNumber ? param : param?.size) ?? 1;
+
+        if (typeof size !== "number") {
+            throw new TypeError("invalid size");
         }
+
+        if (isCountingNumber(size) === false) {
+            throw new RangeError("invalid size");
+        }
+
+        this.#allowOverReleasing = param?.allowOverReleasing ?? true;
         this.#available = size;
-        this.#queue = queue;
+        this.#queue = param?.queue ?? new CircularBufferQueue<QueueEntry>();
         this.#size = size;
         this.#waiting = 0;
     }
@@ -71,9 +97,9 @@ export class SimpleSemaphore {
      * Gets the queue for semaphore.  For testing purposes.
      * @returns an Array of QueueEntries.
      */
-    // public get queue(): readonly QueueEntry[] {
-    //     return Object.freeze([...this.#queue].filter(entry => !entry.rejected));
-    // }
+    public get queue(): readonly QueueEntry[] {
+        return Object.freeze([...this.#queue].filter(entry => !entry.rejected));
+    }
 
     /**
      * Gets the size of the execution pool associated with this semaphore.
@@ -97,7 +123,7 @@ export class SimpleSemaphore {
      */
     public set size(size: number) {
         if (isCountingNumber(size) === false) {
-            throw new Error("Semaphore size must be an integer >0.");
+            throw new RangeError("invalid size");
         }
         // Recompute #available and #size based on provided value for size.
         this.#available = Math.max(0, this.#available + (size - this.#size));
@@ -105,7 +131,7 @@ export class SimpleSemaphore {
         // Reject any promises where the request was larger than the semaphore can provide for.
         for (const queueEntry of this.#queue) {
             if (!queueEntry.rejected && queueEntry.requested > this.#size) {
-                queueEntry.reject(new Error("too large for resize"));
+                queueEntry.reject(new RangeError("invalid resize count"));
             }
         }
         // Process any requests that can be filled with new size.
@@ -151,9 +177,14 @@ export class SimpleSemaphore {
     public async acquire(options: AcquireOptions | number = 1): Promise<() => void> {
         const count: number = (typeof options === "object") ? (options.count ?? 1) : options;
 
-        if (isCountingNumber(count) === false || count > this.size) {
-            throw new Error("Semaphore.acquire() option 'count' must be a positive integer less than the semaphore's size or left undefined.");
+        if (typeof count !== "number") {
+            throw new TypeError("invalid acquire count");
         }
+
+        if (isCountingNumber(count) === false || count > this.size) {
+            throw new RangeError("invalid acquire count");
+        }
+
         return this._acquire({ count })[0];
     }
 
@@ -183,9 +214,10 @@ export class SimpleSemaphore {
             this.#next();
         }).catch(err => {
             queueEntry.rejected = true;
-            this.#waiting -= queueEntry.requested - queueEntry.acquired;
+            this.#waiting -= queueEntry.requested;
             if (queueEntry.acquired) {
-                this.release(queueEntry.acquired);
+                this.#waiting += queueEntry.acquired;
+                this.#release(queueEntry.acquired);
                 queueEntry.acquired = 0;
             }
             throw err;
@@ -232,11 +264,15 @@ export class SimpleSemaphore {
         const count: number = options.count ?? 1;
 
         if (typeof task !== "function") {
-            throw new Error("Semaphore.exec() parameter task must be a function.");
+            throw new TypeError("invalid task");
+        }
+
+        if (typeof count !== "number") {
+            throw new TypeError("invalid acquire count");
         }
 
         if (isCountingNumber(count) === false || count > this.size) {
-            throw new Error("AbortableSemaphore.exec() option 'count' must be a positive integer or left undefined.");
+            throw new RangeError("invalid acquire count");
         }
 
         const [acquirePromise, entry] = this._acquire({ count });
@@ -264,12 +300,13 @@ export class SimpleSemaphore {
             if (remaining > this.#available) {
                 // Partial Acquisition
                 queueEntry.acquired += this.#available;
+                this.#waiting -= this.#available;
                 this.#available = 0;
             } else {
                 // Full Acquisition
-                this.#available -= remaining;
-                this.#waiting -= remaining;
                 queueEntry.acquired = queueEntry.requested;
+                this.#waiting -= remaining;
+                this.#available -= remaining;
                 this.#queue.shift();
                 queueEntry.resolve(() => {
                     if (queueEntry.acquired) {
@@ -287,19 +324,24 @@ export class SimpleSemaphore {
     public release(): void;
     public release(count: number): void;
     public release(count: number = 1): void {
-        if (typeof count === "number") {
-            if (isCountingNumber(count) === false || count > this.size) {
-                throw new Error("Semaphore.release() option count must be a positive integer less than the semaphore's or left undefined.");
-            }
+        if (typeof count !== "number") {
+            throw new TypeError("invalid release count");
+        }
+        if (isCountingNumber(count) === false) {
+            throw new RangeError("invalid release count");
         }
         this.#release(count);
     }
 
     #release(count: number = 1): void {
         if (this.#available + count > this.#size) {
-            throw new Error("Semaphore.release() trying to release when all permits are available.");
+            if (this.#allowOverReleasing === false) {
+                throw new RangeError("invalid release count");
+            }
+            this.#available = this.#size;
+        } else {
+            this.#available += count;
         }
-        this.#available += count;
         this.#next();
     }
 
@@ -340,4 +382,8 @@ export class SimpleMutex extends SimpleSemaphore {
     constructor() {
         super(1);
     }
+
+    get size(): number { return 1; }
+
+    set size(n: number) { }
 }

@@ -1,8 +1,8 @@
-import type { AcquireOptions } from "./SimpleSemaphore";
-import { SimpleSemaphore } from "./SimpleSemaphore";
 /** @import { SemaphoreTask } from "./types.ts"; */
-import type { QueueEntry, RejectFunction, SemaphoreTask } from "./types";
-import { EmptyReject, EmptyResolve, isCountingNumber } from "./util";
+
+import { type AcquireOptions, SimpleSemaphore } from "@/SimpleSemaphore";
+import type { QueueEntry, RejectFunction, SemaphoreTask } from "@/types";
+import { EmptyReject, EmptyResolve, isCountingNumber } from "@/util";
 
 /**
  * Options for functions acquiring semaphores.
@@ -160,16 +160,26 @@ export class AbortableSemaphore extends SimpleSemaphore {
 		const signal = ((typeof param1 === "object") ? (param1?.signal) : ((typeof param2 === "object") ? param2 : undefined));
 		const timeoutMs = ((typeof param1 === "object") ? (param1?.timeoutMs) : ((typeof param2 === "object") ? param3 : param2)) ?? undefined;
 
+		if (typeof count !== "number") {
+			throw new TypeError("invalid acquire count");
+		}
+
 		if (isCountingNumber(count) === false || count > this.size) {
-			throw new Error("AbortableSemaphore.acquire() option 'count' must be a positive integer or left undefined.");
+			throw new RangeError("invalid acquire count");
 		}
 
 		if (signal !== undefined && typeof (signal as any).aborted !== "boolean") {
-			throw new Error("AbortableSemaphore.acquire() option 'signal' must be an AbortSignal or left undefined.");
+			throw new TypeError("invalid signal");
 		}
 
-		if (timeoutMs !== undefined && isCountingNumber(timeoutMs) === false) {
-			throw new Error("AbortableSemaphore.acquire() option 'timeoutMs' must be a positive integer or left undefined.");
+		if (timeoutMs !== undefined) {
+			if (typeof timeoutMs !== "number") {
+				throw new TypeError("invalid timeoutMs");
+			}
+
+			if (isCountingNumber(timeoutMs) === false) {
+				throw new RangeError("invalid timeoutMs");
+			}
 		}
 
 		return this._acquire({ count, signal, timeoutMs })[0];
@@ -255,19 +265,29 @@ export class AbortableSemaphore extends SimpleSemaphore {
 		const timeoutMs: number | undefined = options.timeoutMs ?? undefined;
 
 		if (typeof task !== "function") {
-			throw new Error("Semaphore.exec() parameter task must be a function.");
+			throw new TypeError("invalid task");
+		}
+
+		if (typeof count !== "number") {
+			throw new TypeError("invalid acquire count");
 		}
 
 		if (isCountingNumber(count) === false || count > this.size) {
-			throw new Error("AbortableSemaphore.exec() option 'count' must be a positive integer or left undefined.");
+			throw new RangeError("invalid acquire count");
 		}
 
 		if (signal !== undefined && typeof (signal as any).aborted !== "boolean") {
-			throw new Error("AbortableSemaphore.exec() option 'signal' must be an AbortSignal or left undefined.");
+			throw new TypeError("invalid signal");
 		}
 
-		if (timeoutMs !== undefined && isCountingNumber(timeoutMs) === false) {
-			throw new Error("AbortableSemaphore.exec() option 'timeoutMs' must be a positive integer or left undefined.");
+		if (timeoutMs !== undefined) {
+			if (typeof timeoutMs !== "number") {
+				throw new TypeError("invalid timeoutMs");
+			}
+
+			if (isCountingNumber(timeoutMs) === false) {
+				throw new RangeError("invalid timeoutMs");
+			}
 		}
 
 		// In order to run in loop, exec should be synchronous with acquire, but the actual task should run outside of the thread.
@@ -309,6 +329,10 @@ export class AbortableSemaphore extends SimpleSemaphore {
 export class AbortableMutex extends AbortableSemaphore {
 
 	readonly [Symbol.toStringTag]: string = "AbortableMutex";
+
+	get size(): number { return 1; }
+
+	set size(n: number) { }
 
 	constructor() {
 		super(1);

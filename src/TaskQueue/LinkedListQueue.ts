@@ -95,7 +95,7 @@ export class LinkedListQueue<T> extends AbstractTaskQueue<T> {
 
     at(n: number): T | undefined {
         let idx: number = (n < 0) ? (this.length + n) : n;
-        if (idx > this.length || idx < 0) {
+        if (idx >= this.length || idx < 0) {
             return undefined;
         }
         let node = this.#head!;
