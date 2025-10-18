@@ -6,12 +6,16 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 (async function () {
     const sem = new Semaphore(3);
-    const abortControllers = [new AbortController(), new AbortController()];
+    const abortController = new AbortController();
 
     const promises = [...new Array(100)].map(async (x, idx) => {
         const count = (idx % 3) + 1
         try {
-            let release = await sem.acquire(count, abortControllers[idx % 2].signal, idx > 50 ? 60000 : undefined)
+            let release = await sem.acquire({
+                signal: idx % 2 ? abortController.signal : undefined,
+                size: count,
+                // timeoutMs: idx > 50 ? 6000 : undefined,
+            })
             try {
                 console.log("Resolved[%j] %j", idx, count);
                 await sleep(200 * Math.random());
@@ -24,13 +28,13 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
     });
 
 
-    console.log(abortControllers[1]);
-    sleep(5000)
-        .then(() => abortControllers[1].abort())
-        .then(() => console.log(abortControllers[1]));
+    console.log(abortController);
+    sleep(2000)
+        .then(() => abortController.abort())
+        .then(() => console.log(abortController));
 
     await Promise.allSettled(promises);
-    console.log(abortControllers[1]);
+    console.log(abortController);
 
 
 })();

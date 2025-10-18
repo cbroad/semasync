@@ -3,8 +3,8 @@ const { Mutex, Semaphore } = require("..");
 
 /* main() */
 (async () => {
-    // await NoControl();
-    // await OneByOne();
+    await NoControl();
+    await OneByOne();
     await ThreeConcurrently_PromiseAll();
     await ThreeConcurrently_Looped();
 })();

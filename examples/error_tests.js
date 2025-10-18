@@ -7,11 +7,24 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 (async function () {
     const sem = new Semaphore(9);
     const abortController = new AbortController();
-    const abortController2 = new AbortController();
+    let timeoutDuration = 4000;
+
+    const releaseFunctions = [];
 
     const promises = [...new Array(sem.size - 1)].map(async (x, idx) => {
-        try { return await sem.acquire(2 + idx, idx === 3 ? abortController2.signal : abortController.signal, idx < 5 ? 8100 : undefined).then(n => console.log("Resolved %j", n)); }
-        catch (err) { console.error("Error Caught: %j", err.message); }
+        const count = 2 + idx;
+        try {
+            const release = await sem.acquire({
+                count,
+                signal: count === 7 ? abortController.signal : undefined,
+                timeoutMs: timeoutDuration
+            });
+            console.log("Acquired %j", count)
+            releaseFunctions.push(() => {
+                release();
+                console.log("Released %j", count);
+            });;
+        } catch (err) { console.error("Error Caught: %j", err.message); }
         finally { promises[idx] = undefined; }
     });
 
@@ -19,57 +32,67 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
     console.log("Initial State: Queue=", transformQueue(sem));
     console.log("Initial State: Promisees=", promises);
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log(transformQueue(sem));
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log("Aborting size=5");
-    abortController2.abort();
+    abortController.abort();
     console.log("Finished Aborting");
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log(transformQueue(sem));
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
-    console.log("Shrinking ");
+    console.log("Shrinking")
+    console.log("sem.size=7");
     sem.size = 7;
     console.log("Finished Shrinking");
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log(transformQueue(sem));
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log("Growing");
+    console.log("sem.size=9");
     sem.size = 9;
     console.log("Finished Growing");
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
     console.log(transformQueue(sem));
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
 
 
+    timeoutDuration -= 1000;
     await sleep(1000);
-    console.log("Timing Out");
-    await sleep(500);
+    console.log("Timing Out in %dms", timeoutDuration);
+    await sleep(Math.max(timeoutDuration + 100, 0));
     console.log("Finished Timing Out");
 
 
     await sleep(500);
     console.log(transformQueue(sem));
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
 
 
@@ -81,13 +104,17 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
     await sleep(1000);
     console.log();
-    console.log("Waiting:%j", sem.waiting);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
     console.log(promises);
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
+
+    releaseFunctions.forEach(f => f());
+    console.log("sem: %j", { available: sem.available, size: sem.size, waiting: sem.waiting });
 
 })();
 
 function transformQueue(sem) {
-    return sem.queue
+    return [...sem.queue]
         .map(transformEntry);
 }
 
