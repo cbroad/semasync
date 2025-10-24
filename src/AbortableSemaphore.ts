@@ -16,7 +16,6 @@ import { EmptyReject, EmptyResolve, isCountingNumber } from "@/util";
  *                                              This does not timeout the execution once it has begun, only timeout before it begins.
  */
 export type AbortableAcquireOptions = AcquireOptions & {
-	incrementMaxListeners?: boolean;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 };

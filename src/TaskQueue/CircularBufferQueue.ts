@@ -1,3 +1,4 @@
+import { getNextPowerOf2 } from "@/util";
 import { AbstractTaskQueue } from "./AbstractTaskQueue";
 
 const MIN_CAPACITY = 16;
@@ -43,8 +44,9 @@ export class CircularBuffer<T> extends AbstractTaskQueue<T> {
     constructor(capacity: number);
     constructor(capacity: number = MIN_CAPACITY) {
         super();
-        this.#initialCapacity = capacity;
-        this.#buffer = new Array<T | undefined>(capacity);
+        const actualCapacity = getNextPowerOf2(capacity);
+        this.#initialCapacity = actualCapacity;
+        this.#buffer = new Array<T | undefined>(actualCapacity);
     }
 
     #copyToArray(arr: (T | undefined)[]): (T | undefined)[] {
@@ -68,7 +70,7 @@ export class CircularBuffer<T> extends AbstractTaskQueue<T> {
      * @param {number} newCapacity - new max capacity for buffer.
      * 
      */
-    protected _resize(newCapacity: number): void {
+    protected _resizeBuffer(newCapacity: number): void {
         this.#buffer = this.#copyToArray(new Array<T | undefined>(newCapacity));
         this.#head = 0;
         this.#tail = this.length;
@@ -124,7 +126,7 @@ export class GrowingCircularBuffer<T> extends CircularBuffer<T> {
 
     #grow(): void {
         const newCapacity = this.capacity * 2;
-        this._resize(newCapacity);
+        this._resizeBuffer(newCapacity);
     }
 
     /**
@@ -151,7 +153,7 @@ export class DynamicCircularBuffer<T> extends GrowingCircularBuffer<T> {
 
     #shrink(): void {
         const newCapacity = this.capacity / 2;
-        this._resize(newCapacity);
+        this._resizeBuffer(newCapacity);
     }
 
     shift(): T | undefined {

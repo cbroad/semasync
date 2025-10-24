@@ -17,22 +17,22 @@ interface LinkedListNodePool<T> {
 }
 
 class NodePool<T> implements LinkedListNodePool<T> {
-    #stack: LinkedListNode<T | null>[] = [];
+    #stack: LinkedListNode<unknown>[] = [];
 
     acquire(value: T): LinkedListNode<T> {
         if (this.#stack.length > 0) {
-            const node = this.#stack.pop()!;
+            const node = this.#stack.pop()! as LinkedListNode<T>;
             node.value = value;
-            return node as LinkedListNode<T>;
+            return node;
         }
         return new LinkedListNode(value);
     }
 
     release(node: LinkedListNode<T>): void;
-    release(node: LinkedListNode<T | null>): void {
+    release(node: LinkedListNode<unknown>): void {
         if (this.#stack.length < 100) {
             node.next = null;
-            node.value = null; // Clear the value to avoid memory leaks
+            node.value = undefined;
             this.#stack.push(node);
         }
     }
@@ -80,8 +80,16 @@ export class LinkedListQueue<T> extends AbstractTaskQueue<T> {
         for (let i = 1; i < n; i++) {
             node = node.next!;
         }
-        node.next = null;
         this.#tail = node;
+        let nextNode = node.next;
+        this.#tail.next = null;
+
+        while (nextNode) {
+            node = nextNode;
+            nextNode = node.next;
+            this.#pool.release(node);
+        }
+
         this.#count = n;
     }
 

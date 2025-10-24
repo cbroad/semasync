@@ -19,16 +19,12 @@ export interface AcquireOptions {
  * Options for functions acquiring semaphores.
  * 
  * @typedef {Object} SemaphoreParams
- * @property {boolean} [allowOverReleasing=true] - How to handle realeases that overshoot size. <br />
- *                                                 If true, available is set to size <br />
- *                                                 If false, throw exception.
  * @property {queue} [TaskQueue&lt;any&gt;=CircularBufferQueue&lt;any&gt;]
  *                                               - Queue mechanism to use to keep track of waiting threads.
  * @property {number} [size=1]                   - Size of execution pool.  This is the number of threads whose execution <br />
  *                                                 is allowed by this semaphore.
  */
 export interface SemaphoreParams {
-    allowOverReleasing?: boolean;
     queue?: TaskQueue<any>
     size?: number
 };
@@ -40,7 +36,6 @@ export class SimpleSemaphore {
 
     readonly [Symbol.toStringTag]: string = "Semaphore";
 
-    #allowOverReleasing: boolean;
     #available: number;
     #queue: TaskQueue<QueueEntry>;
     #size: number;
@@ -77,7 +72,6 @@ export class SimpleSemaphore {
             throw new RangeError("invalid size");
         }
 
-        this.#allowOverReleasing = param?.allowOverReleasing ?? true;
         this.#available = size;
         this.#queue = param?.queue ?? new CircularBufferQueue<QueueEntry>();
         this.#size = size;
@@ -86,7 +80,9 @@ export class SimpleSemaphore {
 
 
     /**
-     * Gets the number of permits currently available for this semaphore.
+     * Gets the number of permits currently available for this semaphore. After a resize,
+     * this number may temporarily be negative until the outstanding leases have been
+     * released.
      * @returns the number of permits currently available for this semaphore
      */
     public get available(): number {
@@ -125,8 +121,11 @@ export class SimpleSemaphore {
         if (isCountingNumber(size) === false) {
             throw new RangeError("invalid size");
         }
-        // Recompute #available and #size based on provided value for size.
-        this.#available = Math.max(0, this.#available + (size - this.#size));
+
+        // available could possibly be negative for a period, until releases happen.
+        // This may cause a delay, but is necessary for a sane resize.
+        this.#available = this.#available + (size - this.#size);
+
         this.#size = size;
         // Reject any promises where the request was larger than the semaphore can provide for.
         for (const queueEntry of this.#queue) {
@@ -335,10 +334,7 @@ export class SimpleSemaphore {
 
     #release(count: number = 1): void {
         if (this.#available + count > this.#size) {
-            if (this.#allowOverReleasing === false) {
-                throw new RangeError("invalid release count");
-            }
-            this.#available = this.#size;
+            throw new RangeError("invalid release count");
         } else {
             this.#available += count;
         }
